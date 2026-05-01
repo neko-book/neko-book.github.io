@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>沉思阅读器</title>
+  <style>
+    :root {
+      --bg: #0f0f11;
+      --surface: #161618;
+      --text: #c9c9cc;
+      --text-dim: #7a7a80;
+      --border: #2a2a2e;
+      --accent: #4a4a4f;
+      --accent-hover: #9a9a9f;
+      --fs: 18px;
+      --font-stack: "Noto Serif SC", "Source Han Serif SC", Georgia, "Times New Roman", serif;
+    }
+    body.dawn {
+      --bg: #e6e5e1;
+      --surface: #f0efeb;
+      --text: #1c1c1e;
+      --text-dim: #636366;
+      --border: #c5c4c0;
+      --accent: #8e8e8e;
+      --accent-hover: #48484a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font: var(--fs)/1.85 var(--font-stack);
+      letter-spacing: 0.015em; transition: background 0.3s, color 0.3s;
+      padding: 16px; min-height: 100vh; text-rendering: optimizeLegibility;
+    }
+    /* 自定义滚动条 */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+    .toolbar {
+      position: fixed; top: 0; left: 0; right: 0;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 10px 16px; display: flex; align-items: center; z-index: 100; gap: 10px;
+    }
+    .title-display {
+      flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: 1.1rem; font-weight: 500; color: var(--text);
+      padding: 2px 4px; letter-spacing: 0.05em;
+    }
+    .ctrl { display: flex; gap: 6px; flex-shrink: 0; }
+    button {
+      background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+      padding: 5px 9px; border-radius: 2px; cursor: pointer; font-size: .78rem;
+      font-family: system-ui, sans-serif; letter-spacing: 0.04em; text-transform: uppercase;
+      transition: .2s ease;
+    }
+    button:hover { color: var(--text); border-color: var(--accent); background: rgba(255,255,255,0.05); }
+    button:active { transform: scale(0.98); }
+
+    .content {
+      background: var(--surface); border: 1px solid var(--border);
+      padding: 2.5rem 2rem; max-width: 720px; margin: 55px auto 70px;
+      white-space: pre-wrap; text-align: justify; hyphens: auto;
+    }
+    .toc {
+      position: fixed; top: 0; left: 0; bottom: 0; width: 260px;
+      background: var(--surface); border-right: 1px solid var(--border);
+      transform: translateX(-100%); transition: .25s ease;
+      z-index: 110; overflow-y: auto; padding-top: 55px;
+    }
+    .toc.open { transform: translateX(0); }
+    .toc ul { list-style: none; padding: 8px; }
+    .toc li {
+      padding: 9px 12px; border-bottom: 1px dashed var(--border); cursor: pointer;
+      font-size: .88rem; color: var(--text-dim); transition: .2s;
+    }
+    .toc li:hover, .toc li.active { color: var(--text); background: rgba(255,255,255,0.04); border-color: transparent; }
+    .mask { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 105; display: none; }
+    .mask.show { display: block; }
+    .page-nav {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: var(--surface); border-top: 1px solid var(--border);
+      padding: 10px; display: flex; justify-content: space-between; z-index: 100;
+    }
+    .page-nav button { min-width: 90px; }
+    .page-nav button:disabled { opacity: .3; cursor: not-allowed; }
+
+    @media(max-width: 600px) {
+      .toolbar { flex-wrap: wrap; }
+      .title-display { order: -1; width: 100%; margin-bottom: 4px; }
+      .toc { width: 80%; }
+      .content { margin-top: 65px; padding: 1.5rem 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <header class="toolbar">
+    <div id="title-display" class="title-display">加载中...</div>
+    <div class="ctrl">
+      <button id="toc-btn">目录</button>
+      <button id="font-down">A-</button>
+      <button id="font-up">A+</button>
+      <button id="theme">微光</button>
+    </div>
+  </header>
+  <aside class="toc" id="toc"><ul id="toc-list"></ul></aside>
+  <div class="mask" id="mask"></div>
+  <main id="content" class="content">凝视文本...</main>
+  <nav class="page-nav" id="page-nav">
+    <button id="prev" disabled>上一章</button>
+    <button id="next">下一章</button>
+  </nav>
+
+  <script type="module">
+    const $ = id => document.getElementById(id);
+    const params = new URLSearchParams(location.search);
+    const bookId = params.get('id');
+    if (!bookId) { $('content').textContent = '请在URL中添加参数，例如：reader.html?id=book1'; throw 'Missing ID'; }
+
+    const basePath = `./${bookId}/`;
+    const getStore = k => localStorage.getItem(`r-phil-${bookId}-${k}`);
+    const setStore = (k, v) => localStorage.setItem(`r-phil-${bookId}-${k}`, v);
+
+    let fs = parseInt(getStore('fs')) || 18;
+    document.documentElement.style.setProperty('--fs', fs + 'px');
+    document.body.style.fontSize = fs + 'px';
+    if (getStore('theme') === 'dawn') document.body.classList.add('dawn');
+
+    $('font-up').onclick = () => { if (fs < 26) { fs += 1; updateFs(); } };
+    $('font-down').onclick = () => { if (fs > 13) { fs -= 1; updateFs(); } };
+    function updateFs() { document.body.style.fontSize = fs + 'px'; setStore('fs', fs); }
+    $('theme').onclick = () => {
+      document.body.classList.toggle('dawn');
+      $('theme').textContent = document.body.classList.contains('dawn') ? '幽暗' : '微光';
+      setStore('theme', document.body.classList.contains('dawn') ? 'dawn' : 'dark');
+    };
+
+    function toggleToc(show) {
+      const isOpen = show ?? !$('toc').classList.contains('open');
+      $('toc').classList.toggle('open', isOpen);
+      $('mask').classList.toggle('show', isOpen);
+    }
+    $('toc-btn').onclick = () => toggleToc();
+    $('mask').onclick = () => toggleToc(false);
+
+    try {
+      const metaMod = await import(`${basePath}configuration-type.js`);
+      const { type, title } = metaMod.default;
+      $('title-display').textContent = title || '未命名';
+
+      if (type === 'single') {
+        $('page-nav').style.display = 'none';
+        $('toc-btn').style.display = 'none';
+        const res = await fetch(`${basePath}txt.txt`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        $('content').textContent = await res.text();
+      } else if (type === 'chapters') {
+        const chapMod = await import(`${basePath}chapter-configuration.js`);
+        setupChapters(chapMod.default);
+      } else {
+        throw new Error('未知类型，请在配置中设置 type: "single" 或 "chapters"');
+      }
+    } catch (e) {
+      $('content').textContent = `加载失败：${e.message}\n\n请检查：1. 文件夹是否存在 2. 配置文件格式 3. 是否通过服务器运行`;
+      console.error(e);
+    }
+
+    function setupChapters(chapters) {
+      let idx = parseInt(getStore('idx')) || 0;
+      idx = Math.max(0, Math.min(idx, chapters.length - 1));
+
+      const renderToc = () => {
+        $('toc-list').innerHTML = chapters.map((c, i) =>
+          `<li class="${i === idx ? 'active' : ''}" data-i="${i}">${c.title}</li>`
+        ).join('');
+      };
+
+      const loadChapter = async (i) => {
+        idx = i;
+        setStore('idx', idx);
+        $('content').textContent = '加载中...';
+        $('prev').disabled = idx === 0;
+        $('next').disabled = idx === chapters.length - 1;
+        renderToc();
+        try {
+          const res = await fetch(`${basePath}${chapters[idx].file}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          $('content').textContent = await res.text();
+        } catch (e) {
+          $('content').textContent = `章节加载失败：${e.message}`;
+        }
+      };
+
+      $('toc-list').onclick = e => {
+        const i = +e.target.dataset.i;
+        if (!isNaN(i)) { loadChapter(i); toggleToc(false); }
+      };
+      $('prev').onclick = () => idx > 0 && loadChapter(idx - 1);
+      $('next').onclick = () => idx < chapters.length - 1 && loadChapter(idx + 1);
+      document.addEventListener('keydown', e => {
+        if (e.key === 'ArrowLeft' && idx > 0) loadChapter(idx - 1);
+        if (e.key === 'ArrowRight' && idx < chapters.length - 1) loadChapter(idx + 1);
+        if (e.key === 'Escape') toggleToc(false);
+      });
+
+      loadChapter(idx);
+    }
+  </script>
+</body>
+</html>
