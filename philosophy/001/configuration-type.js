@@ -1,1 +1,1 @@
-export default { type: 'chapters', title: '月亮之曲-回响' };
+export default { type: 'chapters', title: '月之曲 · 执念与回响' };
